@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Змійка зі скінами та монетами</title>
+  <style>
+    body {
+      margin: 0;
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      color: #d1d5db;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      user-select: none;
+    }
+    h1 {
+      margin-bottom: 0.2em;
+      color: #a3e635;
+    }
+    #game {
+      position: relative;
+      width: 320px;
+      height: 320px;
+      background: #334155;
+      border-radius: 12px;
+      box-shadow: 0 0 15px #a3e635aa inset;
+      margin-bottom: 1em;
+    }
+    canvas {
+      display: block;
+      margin: auto;
+      background: #1e293b;
+      border-radius: 12px;
+    }
+    #scoreboard {
+      margin-bottom: 1em;
+      font-size: 1.2em;
+      text-align: center;
+    }
+    button {
+      background-color: #22c55e;
+      border: none;
+      padding: 0.6em 1.2em;
+      margin: 0 0.4em;
+      border-radius: 10px;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+      user-select: none;
+    }
+    button:hover:not(:disabled) {
+      background-color: #16a34a;
+    }
+    button:disabled {
+      background-color: #94a3b8;
+      cursor: default;
+    }
+    #info {
+      margin-top: 1em;
+      font-size: 0.9em;
+      color: #94a3b8;
+      max-width: 320px;
+      text-align: center;
+      line-height: 1.3;
+    }
+    #skins {
+      margin-top: 1em;
+      display: flex;
+      justify-content: center;
+      gap: 1em;
+      flex-wrap: wrap;
+      max-width: 350px;
+    }
+    .skin-card {
+      background: #475569;
+      border-radius: 12px;
+      padding: 0.5em;
+      text-align: center;
+      width: 90px;
+      user-select: none;
+    }
+    .skin-preview {
+      width: 60px;
+      height: 20px;
+      margin-bottom: 0.4em;
+      border-radius: 6px;
+      margin-left: auto;
+      margin-right: auto;
+      box-shadow: 0 0 6px #0008 inset;
+    }
+    .skin-head {
+      height: 10px;
+      border-radius: 6px 6px 0 0;
+    }
+    .skin-body {
+      height: 10px;
+      border-radius: 0 0 6px 6px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Змійка зі скінами та монетами</h1>
+  <div id="scoreboard">Рахунок: 0 | Монети: 0 | Рекорд: 0</div>
+  <div id="game">
+    <canvas id="canvas" width="320" height="320"></canvas>
+  </div>
+  <div>
+    <button id="startPauseBtn">Старт</button>
+    <button id="resetBtn">Перезапустити</button>
+  </div>
+
+  <div id="skins">
+    <!-- Тут будуть скіни -->
+  </div>
+
+  <div id="info">
+    Керуйте стрілками або WASD. Пробіл — пауза.<br />
+    Їжте їжу, не врізайтесь у стіни або в себе.<br />
+    Купуйте скіни за монети та змінюйте вигляд змійки!
+  </div>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+
+      const gridSize = 16;
+      const cellSize = canvas.width / gridSize;
+
+      const skins = [
+        {
+          id: 'default',
+          name: 'Зелена',
+          cost: 0,
+          headColor: '#4ade80',
+          bodyColor: '#22c55e',
+        },
+        {
+          id: 'red',
+          name: 'Червона',
+          cost: 5,
+          headColor: '#f87171',
+          bodyColor: '#ef4444',
+        },
+        {
+          id: 'blue',
+          name: 'Синя',
+          cost: 10,
+          headColor: '#60a5fa',
+          bodyColor: '#3b82f6',
+        },
+        {
+          id: 'gold',
+          name: 'Золота',
+          cost: 20,
+          headColor: '#facc15',
+          bodyColor: '#ca8a04',
+        },
+      ];
+
+      let snake = [{ x: 8, y: 8 }];
+      let direction = { x: 0, y: 0 };
+      let food = null;
+      let running = false;
+      let score = 0;
+      let coins = 0;
+      let highScore = 0;
+      let gameOver = false;
+      let gameInterval = null;
+
+      let ownedSkins = new Set(['default']);
+      let selectedSkin = 'default';
+
+      const scoreboard = document.getElementById('scoreboard');
+      const startPauseBtn = document.getElementById('startPauseBtn');
+      const resetBtn = document.getElementById('resetBtn');
+      const skinsDiv = document.getElementById('skins');
+
+      function loadData() {
+        try {
+          const hs = localStorage.getItem('snake_high_score');
+          if (hs) highScore = parseInt(hs, 10);
+          const c = localStorage.getItem('snake_coins');
+          if (c) coins = parseInt(c, 10);
+          const owned = localStorage.getItem('snake_owned_skins');
+          if (owned) ownedSkins = new Set(JSON.parse(owned));
+          const sel = localStorage.getItem('snake_selected_skin');
+          if (sel && skins.some(s => s.id === sel)) selectedSkin = sel;
+        } catch {}
+      }
+
+      function saveData() {
+        try {
+          localStorage.setItem('snake_high_score', highScore);
+          localStorage.setItem('snake_coins', coins);
+          localStorage.setItem('snake_owned_skins', JSON.stringify([...ownedSkins]));
+          localStorage.setItem('snake_selected_skin', selectedSkin);
+        } catch {}
+      }
+
+      function placeFood() {
+        const occupied = new Set(snake.map(p => `${p.x},${p.y}`));
+        const emptyCells = [];
+        for (let x = 0; x < gridSize; x++) {
+          for (let y = 0; y < gridSize; y++) {
+            if (!occupied.has(`${x},${y}`)) emptyCells.push({ x, y });
+          }
+        }
+        if (emptyCells.length === 0) return null;
+        return emptyCells[Math.floor(Math.random() * emptyCells.length)];
+      }
+
+      function drawCell(x, y, color) {
+        ctx.fillStyle = color;
+        ctx.fillRect(x * cellSize, y * cellSize, cellSize - 1, cellSize - 1);
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (food) drawCell(food.x, food.y, '#f87171');
+        const skin = skins.find(s => s.id === selectedSkin) || skins[0];
+        for (let i = 0; i < snake.length; i++) {
+          if (i === 0) drawCell(snake[i].x, snake[i].y, skin.headColor);
+          else drawCell(snake[i].x, snake[i].y, skin.bodyColor);
+        }
+      }
+
+      function update() {
+        if (!running) return;
+        const head = snake[0];
+        const newHead = { x: head.x + direction.x, y: head.y + direction.y };
+
+        if (
+          newHead.x < 0 ||
+          newHead.x >= gridSize ||
+          newHead.y < 0 ||
+          newHead.y >= gridSize
+        ) {
+          endGame();
+          return;
+        }
+
+        for (const part of snake) {
+          if (part.x === newHead.x && part.y === newHead.y) {
+            endGame();
+            return;
+          }
+        }
+
+        snake.unshift(newHead);
+
+        if (food && newHead.x === food.x && newHead.y === food.y) {
+          score++;
+          coins++;
+          if (score > highScore) {
+            highScore = score;
+          }
+          food = placeFood();
+
+          updateScore();
+          createSkinCards();  // Оновлюємо кнопки скіна тут
+          saveData();
+        } else {
+          snake.pop();
+        }
+
+        draw();
+      }
+
+      function updateScore() {
+        scoreboard.textContent = `Рахунок: ${score} | Монети: ${coins} | Рекорд: ${highScore}`;
+      }
+
+      function endGame() {
+        running = false;
+        gameOver = true;
+        startPauseBtn.textContent = 'Гра завершена';
+        alert(`Game Over! Ваш рахунок: ${score}`);
+      }
+
+      function resetGame() {
+        snake = [{ x: 8, y: 8 }];
+        direction = { x: 0, y: 0 };
+        score = 0;
+        gameOver = false;
+        food = placeFood();
+        updateScore();
+        draw();
+        running = false;
+        startPauseBtn.textContent = 'Старт';
+        clearInterval(gameInterval);
+        gameInterval = null;
+      }
+
+      function toggleRunning() {
+        if (gameOver) return;
+        running = !running;
+        if (running) {
+          startPauseBtn.textContent = 'Пауза';
+          if (!gameInterval) {
+            gameInterval = setInterval(update, 120);
+          }
+        } else {
+          startPauseBtn.textContent = 'Старт';
+          clearInterval(gameInterval);
+          gameInterval = null;
+        }
+      }
+
+      function changeDirection(newDir) {
+        if (
+          (newDir.x === -direction.x && newDir.y === -direction.y) ||
+          (newDir.x === 0 && newDir.y === 0)
+        )
+          return;
+        direction = newDir;
+        if (!running && !gameOver) toggleRunning();
+      }
+
+      function createSkinCards() {
+        skinsDiv.innerHTML = '';
+        skins.forEach((skin) => {
+          const card = document.createElement('div');
+          card.className = 'skin-card';
+
+          const preview = document.createElement('div');
+          preview.className = 'skin-preview';
+
+          const headPart = document.createElement('div');
+          headPart.className = 'skin-head';
+          headPart.style.backgroundColor = skin.headColor;
+          preview.appendChild(headPart);
+
+          const bodyPart = document.createElement('div');
+          bodyPart.className = 'skin-body';
+          bodyPart.style.backgroundColor = skin.bodyColor;
+          preview.appendChild(bodyPart);
+
+          card.appendChild(preview);
+
+          const nameLabel = document.createElement('div');
+          nameLabel.textContent = skin.name;
+          card.appendChild(nameLabel);
+
+          const btn = document.createElement('button');
+
+          if (ownedSkins.has(skin.id)) {
+            if (selectedSkin === skin.id) {
+              btn.textContent = 'Вибрано';
+              btn.disabled = true;
+            } else {
+              btn.textContent = 'Вибрати';
+              btn.disabled = false;
+              btn.onclick = () => {
+                selectedSkin = skin.id;
+                saveData();
+                createSkinCards();
+                draw();
+              };
+            }
+          } else {
+            btn.textContent = `Купити (${skin.cost}💰)`;
+            btn.disabled = coins < skin.cost;
+            btn.onclick = () => {
+              if (coins >= skin.cost) {
+                coins -= skin.cost;
+                ownedSkins.add(skin.id);
+                selectedSkin = skin.id;
+                saveData();
+                updateScore();
+                createSkinCards();
+                draw();
+              }
+            };
+          }
+
+          card.appendChild(btn);
+
+          skinsDiv.appendChild(card);
+        });
+      }
+
+      window.addEventListener('keydown', (e) => {
+        if (
+          ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', ' '].includes(
+            e.key
+          )
+        ) {
+          e.preventDefault();
+        }
+        switch (e.key) {
+          case 'ArrowUp':
+          case 'w':
+            changeDirection({ x: 0, y: -1 });
+            break;
+          case 'ArrowDown':
+          case 's':
+            changeDirection({ x: 0, y: 1 });
+            break;
+          case 'ArrowLeft':
+          case 'a':
+            changeDirection({ x: -1, y: 0 });
+            break;
+          case 'ArrowRight':
+          case 'd':
+            changeDirection({ x: 1, y: 0 });
+            break;
+          case ' ':
+            toggleRunning();
+            break;
+        }
+      });
+
+      startPauseBtn.addEventListener('click', () => {
+        toggleRunning();
+      });
+      resetBtn.addEventListener('click', () => {
+        resetGame();
+      });
+
+      loadData();
+      resetGame();
+      createSkinCards();
+    })();
+  </script>
+</body>
+</html>
